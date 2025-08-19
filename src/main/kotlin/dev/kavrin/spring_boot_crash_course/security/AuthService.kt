@@ -47,7 +47,26 @@ class AuthService(
     }
 
     fun refresh(refreshToken: String): TokenPair {
-
+        // Validate structure & type
+        if (!jwtService.validateRefreshToken(refreshToken)) {
+            throw BadCredentialsException("Invalid refresh token")
+        }
+        val userId = jwtService.getUserIdFromToken(refreshToken)
+        val userObjectId = try { ObjectId(userId) } catch (e: Exception) { throw BadCredentialsException("Invalid refresh token") }
+        val hashed = hashedToken(refreshToken.removePrefix("Bearer "))
+        val stored = refreshTokenRepository.findByUserIdAndHashedToken(userObjectId, hashed)
+            ?: throw BadCredentialsException("Invalid refresh token")
+        // Expiry double check (TTL index will eventually remove it, but ensure immediate rejection)
+        if (stored.expiresAt.isBefore(Instant.now())) {
+            refreshTokenRepository.deleteByUserIdAndHashedToken(userObjectId, hashed)
+            throw BadCredentialsException("Expired refresh token")
+        }
+        // Rotation: issue new refresh token and delete old one
+        val newAccessToken = jwtService.generateAccessToken(userId)
+        val newRefreshToken = jwtService.generateRefreshToken(userId)
+        refreshTokenRepository.deleteByUserIdAndHashedToken(userObjectId, hashed)
+        storeRefreshToken(userObjectId, newRefreshToken)
+        return TokenPair(newAccessToken, newRefreshToken)
     }
 
     private fun storeRefreshToken(userId: ObjectId, rawRefreshToken: String) {

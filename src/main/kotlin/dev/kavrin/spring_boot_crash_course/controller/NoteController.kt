@@ -3,15 +3,14 @@ package dev.kavrin.spring_boot_crash_course.controller
 import dev.kavrin.spring_boot_crash_course.database.model.Note
 import dev.kavrin.spring_boot_crash_course.database.repository.NoteRepository
 import org.bson.types.ObjectId
-import org.springframework.web.bind.annotation.DeleteMapping
-import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PathVariable
-import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestParam
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.*
 import java.time.Instant
+import io.swagger.v3.oas.annotations.tags.Tag
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
 
 // GET: http://localhost:3000/notes?ownerId=123
 // POST: http://localhost:3000/notes
@@ -19,6 +18,7 @@ import java.time.Instant
 
 @RestController
 @RequestMapping("/api/notes")
+@Tag(name = "Notes", description = "CRUD operations for notes")
 class NoteController(
     private val noteRepository: NoteRepository,
 ) {
@@ -39,6 +39,15 @@ class NoteController(
     )
 
     @PostMapping
+    @Operation(
+        summary = "Create or update a note",
+        description = "Creates a new note if id is null, otherwise updates the existing note.",
+        responses = [
+            ApiResponse(responseCode = "200", description = "Note saved", content = [
+                Content(schema = Schema(implementation = NoteResponse::class))
+            ])
+        ]
+    )
     fun save(
         @RequestBody body: NoteRequest
     ): NoteResponse {
@@ -49,14 +58,22 @@ class NoteController(
     }
 
     @GetMapping
+    @Operation(
+        summary = "List notes by owner",
+        description = "Returns all notes belonging to the given owner id"
+    )
     fun findByOwnerId(
-        @RequestParam(required = true) ownerId: String,
+        @RequestParam(required = true) @Parameter(description = "Owner user id (ObjectId)") ownerId: String,
     ): List<NoteResponse> {
         return noteRepository.findByOwnerId(ObjectId(ownerId))
             .map { it.toResponse() }
     }
 
     @DeleteMapping(path = ["/{id}"])
+    @Operation(
+        summary = "Delete note by id",
+        description = "Deletes the note with the provided id if it exists"
+    )
     fun deleteById(
         @PathVariable id: String,
     ) {
