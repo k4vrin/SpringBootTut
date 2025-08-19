@@ -7,9 +7,13 @@ import dev.kavrin.spring_boot_crash_course.database.repository.UserRepository
 import org.bson.types.ObjectId
 import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Base64
+import io.swagger.v3.oas.annotations.media.Schema
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 
 @Service
 class AuthService(
@@ -19,8 +23,11 @@ class AuthService(
     private val refreshTokenRepository: RefreshTokenRepository
 ) {
 
+    @Schema(description = "Pair of JWT access & refresh tokens")
     data class TokenPair(
+        @Schema(description = "Short-lived access token (JWT)", example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access")
         val accessToken: String,
+        @Schema(description = "Longer-lived refresh token used to rotate tokens", example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh")
         val refreshToken: String,
     )
 
@@ -46,26 +53,29 @@ class AuthService(
         return TokenPair(newAccessToken, newRefreshToken)
     }
 
+    @Transactional
     fun refresh(refreshToken: String): TokenPair {
         // Validate structure & type
         if (!jwtService.validateRefreshToken(refreshToken)) {
-            throw BadCredentialsException("Invalid refresh token")
+            throw ResponseStatusException(HttpStatus.valueOf(401), "Invalid refresh token")
         }
         val userId = jwtService.getUserIdFromToken(refreshToken)
-        val userObjectId = try { ObjectId(userId) } catch (e: Exception) { throw BadCredentialsException("Invalid refresh token") }
+        val user = userRepository.findById(ObjectId(userId)).orElseThrow {
+            throw ResponseStatusException(HttpStatus.valueOf(401), "Invalid refresh token")
+        }
         val hashed = hashedToken(refreshToken.removePrefix("Bearer "))
-        val stored = refreshTokenRepository.findByUserIdAndHashedToken(userObjectId, hashed)
+        val stored = refreshTokenRepository.findByUserIdAndHashedToken(user.id, hashed)
             ?: throw BadCredentialsException("Invalid refresh token")
         // Expiry double check (TTL index will eventually remove it, but ensure immediate rejection)
         if (stored.expiresAt.isBefore(Instant.now())) {
-            refreshTokenRepository.deleteByUserIdAndHashedToken(userObjectId, hashed)
+            refreshTokenRepository.deleteByUserIdAndHashedToken(user.id, hashed)
             throw BadCredentialsException("Expired refresh token")
         }
         // Rotation: issue new refresh token and delete old one
         val newAccessToken = jwtService.generateAccessToken(userId)
         val newRefreshToken = jwtService.generateRefreshToken(userId)
-        refreshTokenRepository.deleteByUserIdAndHashedToken(userObjectId, hashed)
-        storeRefreshToken(userObjectId, newRefreshToken)
+        refreshTokenRepository.deleteByUserIdAndHashedToken(user.id, hashed)
+        storeRefreshToken(user.id, newRefreshToken)
         return TokenPair(newAccessToken, newRefreshToken)
     }
 

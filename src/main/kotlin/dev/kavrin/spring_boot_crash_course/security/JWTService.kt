@@ -4,13 +4,15 @@ import io.jsonwebtoken.Claims
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.web.server.ResponseStatusException
 import java.util.Base64
 import java.util.Date
 
 @Service
 class JWTService(
-    @Value("JWT_SECRET_BASE64") private val jwtSecret: String
+    @param:Value("\${jwt.secret}") private val jwtSecret: String,
 ) {
 
     private val secretKey = Keys.hmacShaKeyFor(Base64.getDecoder().decode(jwtSecret))
@@ -49,7 +51,7 @@ class JWTService(
 
     fun getUserIdFromToken(token: String): String {
 
-        return parseAllClaims(token)?.subject ?: throw IllegalArgumentException("Invalid token")
+        return parseAllClaims(token)?.subject ?: throw ResponseStatusException(HttpStatus.valueOf(401), "Invalid token")
     }
 
     fun validateRefreshToken(token: String): Boolean {

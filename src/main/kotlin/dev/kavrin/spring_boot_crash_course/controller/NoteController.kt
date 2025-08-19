@@ -11,6 +11,9 @@ import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
+import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
+import org.springframework.security.core.context.SecurityContextHolder
 
 // GET: http://localhost:3000/notes?ownerId=123
 // POST: http://localhost:3000/notes
@@ -25,6 +28,9 @@ class NoteController(
 
     data class NoteRequest(
         val id: String?,
+        @field:NotBlank(
+            message = "Title can't be blank."
+        )
         val title: String,
         val content: String,
         val color: String,
@@ -43,16 +49,19 @@ class NoteController(
         summary = "Create or update a note",
         description = "Creates a new note if id is null, otherwise updates the existing note.",
         responses = [
-            ApiResponse(responseCode = "200", description = "Note saved", content = [
-                Content(schema = Schema(implementation = NoteResponse::class))
-            ])
+            ApiResponse(
+                responseCode = "200", description = "Note saved", content = [
+                    Content(schema = Schema(implementation = NoteResponse::class))
+                ]
+            )
         ]
     )
     fun save(
-        @RequestBody body: NoteRequest
+        @Valid @RequestBody body: NoteRequest,
     ): NoteResponse {
+        val ownerId = SecurityContextHolder.getContext().authentication.principal as String
         val note = noteRepository.save(
-            body.toNote()
+            body.toNote(ownerId)
         )
         return note.toResponse()
     }
@@ -62,9 +71,8 @@ class NoteController(
         summary = "List notes by owner",
         description = "Returns all notes belonging to the given owner id"
     )
-    fun findByOwnerId(
-        @RequestParam(required = true) @Parameter(description = "Owner user id (ObjectId)") ownerId: String,
-    ): List<NoteResponse> {
+    fun findByOwnerId(): List<NoteResponse> {
+        val ownerId = SecurityContextHolder.getContext().authentication.principal as String
         return noteRepository.findByOwnerId(ObjectId(ownerId))
             .map { it.toResponse() }
     }
@@ -77,7 +85,13 @@ class NoteController(
     fun deleteById(
         @PathVariable id: String,
     ) {
-        noteRepository.deleteById(ObjectId(id))
+        val note = noteRepository.findById(ObjectId(id)).orElseThrow {
+            IllegalArgumentException("Note not found")
+        }
+        val ownerId = SecurityContextHolder.getContext().authentication.principal as String
+        if (note.ownerId.toHexString() == ownerId) {
+            noteRepository.deleteById(ObjectId(id))
+        }
     }
 }
 
@@ -91,13 +105,13 @@ private fun Note.toResponse(): NoteController.NoteResponse {
     )
 }
 
-private fun NoteController.NoteRequest.toNote(): Note {
+private fun NoteController.NoteRequest.toNote(ownerId: String): Note {
     return Note(
         id = this.id?.let { ObjectId(it) } ?: ObjectId.get(),
         title = this.title,
         content = this.content,
         colorHex = this.color,
         createdAt = Instant.now(),
-        ownerId = ObjectId(),
+        ownerId = ObjectId(ownerId),
     )
 }
